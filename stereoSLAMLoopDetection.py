@@ -7,6 +7,7 @@ from lib.visualization import plotting
 from lib.visualization.video import play_trip
 
 from tqdm import tqdm
+from pprint import pprint
 
 import dbow
 
@@ -18,6 +19,9 @@ class VisualOdometry():
         self.gt_poses = self._load_poses(os.path.join(data_dir, 'poses.txt'))
         self.images_l = self._load_images(os.path.join(data_dir, 'image_l'))
         self.images_r = self._load_images(os.path.join(data_dir, 'image_r'))
+
+        print("Number of images: ", len(self.images_l))
+        print("Number of poses: ", len(self.gt_poses))
 
         block = 11
         P1 = block * block * 8
@@ -35,12 +39,15 @@ class VisualOdometry():
                 # Create Vocabulary
         n_clusters = 10
         depth = 2
-        vocabulary = dbow.Vocabulary([], n_clusters, depth)
+        #vocabulary = dbow.Vocabulary([], n_clusters, depth)
         # Loading the vocabulary
-        self.vocabulary = vocabulary.load('ORBvoc.txt')
+        print("Loading Vocabulary")
+        self.vocabulary = dbow.Vocabulary.load('KITTIORB.pickle')
 
         # Create a database
         self.db = dbow.Database(self.vocabulary)
+
+        self.mean_scores = []
 
         # ORB
         self.orb = cv2.ORB_create(3000)
@@ -371,10 +378,17 @@ class VisualOdometry():
         return transformation_matrix
     
     def loop_detection(self, descriptors):
-
+        
+        number_loop_frames = 5
         descs = [dbow.ORB.from_cv_descriptor(desc) for desc in descriptors]
         self.db.add(descs)
         scores = self.db.query(descs)
+        print("Scores size: ", len(scores))
+        
+        if len(self.mean_scores) >= 2:
+            print(self.mean_scores)
+            #sorted_scores = np.sort(np.array(self.mean_scores))
+            #print(sorted_scores)
 
         if len(scores) > 1:
             index_similar_image = np.argmax(scores[:len(scores)-1])
@@ -425,11 +439,12 @@ def main():
     data_dir = 'KITTI_sequence_1'  # Try KITTI_sequence_2
     vo = VisualOdometry(data_dir)
 
-    #play_trip(vo.images_l, vo.images_r)  # Comment out to not play the trip
+    play_trip(vo.images_l, vo.images_r)  # Comment out to not play the trip
 
     gt_path = []
     estimated_path = []
     for i, gt_pose in enumerate(tqdm(vo.gt_poses, unit="poses")):
+        print(i)
         if i < 1:
             cur_pose = gt_pose
         else:
