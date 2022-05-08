@@ -1,7 +1,9 @@
 import os
 import numpy as np
 import cv2
+from pandas import describe_option
 from scipy.optimize import least_squares
+from sklearn.feature_extraction.text import TfidfVectorizer
 
 from lib.visualization import plotting
 from lib.visualization.video import play_trip
@@ -9,18 +11,24 @@ from lib.visualization.video import play_trip
 from tqdm import tqdm
 from pprint import pprint
 
-import dbow
+import bag_of_words
 
+import dbow
 
 
 class VisualOdometry():
     def __init__(self, data_dir):
-        self.K_l, self.P_l, self.K_r, self.P_r = self._load_calib(os.path.join(data_dir, 'calib.txt'))
-        self.gt_poses = self._load_poses(os.path.join(data_dir, 'poses.txt'))
-        self.images_l = self._load_images(os.path.join(data_dir, 'image_l'))
-        self.images_r = self._load_images(os.path.join(data_dir, 'image_r'))
+        
+        print("Loading Images")
+        self.K_l, self.P_l, self.K_r, self.P_r = self._load_calib("C:/Users/45213/Downloads/data_odometry_gray/dataset/sequences/07/calib.txt")
+        self.gt_poses = self._load_poses("C:/Users/45213/Downloads/data_odometry_poses/dataset/poses/07.txt")
+        #self.images_l = self._load_images("C:/Users/45213/OneDrive/Desktop/sequence3/images_l")
+        #self.images_r = self._load_images("C:/Users/45213/OneDrive/Desktop/sequence3/images_r")
+        self.images_l = self._load_images("C:/Users/45213/Downloads/data_odometry_gray/dataset/sequences/07/image_0")
+        self.images_r = self._load_images("C:/Users/45213/Downloads/data_odometry_gray/dataset/sequences/07/image_1")
 
-        print("Number of images: ", len(self.images_l))
+        print("Number of left images: ", len(self.images_l))
+        print("Number of right images: ", len(self.images_r))
         print("Number of poses: ", len(self.gt_poses))
 
         block = 11
@@ -41,13 +49,14 @@ class VisualOdometry():
         depth = 2
         #vocabulary = dbow.Vocabulary([], n_clusters, depth)
         # Loading the vocabulary
-        print("Loading Vocabulary")
-        self.vocabulary = dbow.Vocabulary.load('KITTIORB.pickle')
+        #print("Loading Vocabulary")
+        #self.vocabulary = dbow.Vocabulary.load('KITTIORB.pickle')
 
         # Create a database
-        self.db = dbow.Database(self.vocabulary)
+        #self.db = dbow.Database(self.vocabulary)
 
-        self.mean_scores = []
+        #self.mean_scores = []
+
 
         # ORB
         self.orb = cv2.ORB_create(3000)
@@ -308,6 +317,7 @@ class VisualOdometry():
         Q2 (ndarray): 3D points seen from the i'th image. In shape (n, 3)
         """
         # Triangulate points from i-1'th image
+
         Q1 = cv2.triangulatePoints(self.P_l, self.P_r, q1_l.T, q1_r.T)
         # Un-homogenize
         Q1 = np.transpose(Q1[:3] / Q1[3])
@@ -424,36 +434,101 @@ class VisualOdometry():
         # Calculate the right keypoints
         tp1_l, tp1_r, tp2_l, tp2_r = self.calculate_right_qs(tp1_l, tp2_l, self.disparities[i - 1], self.disparities[i])
 
-        # Calculate the 3D points
-        Q1, Q2 = self.calc_3d(tp1_l, tp1_r, tp2_l, tp2_r)
+        if len(tp1_r) and len(tp2_r):
+            # Calculate the 3D points
+            Q1, Q2 = self.calc_3d(tp1_l, tp1_r, tp2_l, tp2_r)
 
-        # Estimate the transformation matrix
-        transformation_matrix = self.estimate_pose(tp1_l, tp2_l, Q1, Q2)
+            # Estimate the transformation matrix
+            transformation_matrix = self.estimate_pose(tp1_l, tp2_l, Q1, Q2)
 
-        self.loop_detection(descriptors)
+            #self.loop_detection(descriptors)
         
-        return transformation_matrix
+            return transformation_matrix, descriptors
+        return None, descriptors
 
 
 def main():
     data_dir = 'KITTI_sequence_1'  # Try KITTI_sequence_2
     vo = VisualOdometry(data_dir)
 
-    play_trip(vo.images_l, vo.images_r)  # Comment out to not play the trip
+    #play_trip(vo.images_l, vo.images_r)  # Comment out to not play the trip
+
+    n_clusters = 10 
+    n_features = 200
+    assert n_clusters != 0 and n_features != 0, "Remember to change n_clusters and n_features in main"
+
+    #print("Training bag of words")
+    # Make the BoW and train it on the training data
+    bow = bag_of_words.BoW(n_clusters, n_features)
+    #bow.train(vo.images_l)
+    #print("Done training bag of words")
+
+   
+    keyframe_size = 100
+    frame_count = 0
+    number_of_loops_detected = 0
 
     gt_path = []
     estimated_path = []
-    for i, gt_pose in enumerate(tqdm(vo.gt_poses, unit="poses")):
-        print(i)
+    
+    traj = np.zeros(shape=(600, 800, 3))
+
+    for i in tqdm(range(len(vo.images_l))):
+        gt_pose = vo.gt_poses[i]
         if i < 1:
             cur_pose = gt_pose
         else:
-            transf = vo.get_pose(i)
-            cur_pose = np.matmul(cur_pose, transf)
-        gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
-        estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
-    plotting.visualize_paths(gt_path, estimated_path, "Stereo Visual Odometry",
-                             file_out=os.path.basename(data_dir) + ".html")
+            frame_count += 1
+
+        
+            transf, descriptors = vo.get_pose(i)
+            # Find the closest match in the training set
+            
+            idx = bow.predict(vo.images_l[i], keyframe_size, frame_count, descriptors)
+            if idx != -1:
+                frame_count = 0
+                number_of_loops_detected += 1
+                print("Number of loops detected: ", number_of_loops_detected)
+                # If a match was found make a show_image with the query and match image
+                show_image = bag_of_words.make_stackimage(vo.images_l[i], vo.images_l[idx])
+                print("id query: ", i)
+
+                gt_pose_x_loop, gt_pose_y_loop = cur_pose[0, 3], cur_pose[2, 3]
+                traj = cv2.circle(traj, (int(gt_pose_x_loop) + 500, int(gt_pose_y_loop) + 300), 12, list((255, 0, 0)), 2)
+                # Show the result
+                bag_of_words.put_text(show_image, "bottom_center", f"Press any key.. ({i}/{len(vo.images_l)}). ESC to stop")
+                cv2.imshow("match", show_image)
+                key = cv2.waitKey(0)
+                if key == 27:
+                    break
+
+
+            if transf is not None:
+                cur_pose = np.matmul(cur_pose, transf)
+
+        gt_pose_x, gt_pose_y = gt_pose[0, 3], gt_pose[2, 3]
+        estimated_pose_x, estimated_pose_y = cur_pose[0, 3], cur_pose[2, 3]
+
+
+        traj = cv2.circle(traj, (int(gt_pose_x) + 500, int(gt_pose_y) + 300), 1, list((0, 0, 255)), 4)
+        traj = cv2.circle(traj, (int(estimated_pose_x) + 500, int(estimated_pose_y) + 300), 1, list((0, 255, 0)), 4)
+
+        cv2.putText(traj, 'Actual Position:', (140, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255,255,255), 1)
+        cv2.putText(traj, 'Red', (270, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(0, 0, 255), 2)
+        cv2.putText(traj, 'Estimated Odometry Position:', (30, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255,255,255), 1)
+        cv2.putText(traj, 'Green', (270, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(0, 255, 0), 2)
+        cv2.putText(traj, 'Loop Detected:', (145, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255,255,255), 1)
+        cv2.putText(traj, 'Blue', (270, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5,(255, 0, 0), 2)
+
+        cv2.imshow('trajectory', traj)
+        cv2.waitKey(1)
+    
+    cv2.imwrite("finalPath.png", traj)
+        #gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
+        #estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
+
+    #plotting.visualize_paths(gt_path, estimated_path, "Stereo Visual Odometry",
+               #              file_out=os.path.basename(data_dir) + ".html")
 
 
 if __name__ == "__main__":
