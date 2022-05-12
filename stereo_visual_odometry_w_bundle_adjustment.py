@@ -1,3 +1,4 @@
+from operator import imod
 import os
 import numpy as np
 import cv2
@@ -8,7 +9,6 @@ from lib.visualization import plotting
 from lib.visualization.video import play_trip
 
 from bundle_adjustment_solution import run_BA
-
 
 from tqdm import tqdm
 
@@ -39,7 +39,7 @@ class VisualOdometry():
         self.data = []
 
 
-    @staticmethod
+    @staticmethod 
     def _load_calib(filepath):
         """
         Loads the calibration of the camera
@@ -63,7 +63,7 @@ class VisualOdometry():
             K_r = P_r[0:3, 0:3]
         return K_l, P_l, K_r, P_r
 
-    @staticmethod
+    @staticmethod 
     def _load_poses(filepath):
         """
         Loads the GT poses
@@ -85,7 +85,8 @@ class VisualOdometry():
                 poses.append(T)
         return poses
 
-    @staticmethod
+    
+    @staticmethod 
     def _load_images(filepath):
         """
         Loads the images
@@ -323,7 +324,7 @@ class VisualOdometry():
         Q2 = np.transpose(Q2[:3] / Q2[3])
 
         for i in range(len(Q2) - 1, 0, -1):
-            if (Q2[i][2] > 100 or Q1[i][2] > 100):
+            if (Q2[i][2] > 75 or Q1[i][2] > 75):
                 Q2 = np.delete(Q2, i, axis=0)
                 q2_l = np.delete(q2_l,i, axis=0)
                 q2_r = np.delete(q2_r,i, axis=0)
@@ -334,6 +335,7 @@ class VisualOdometry():
 
 
         return Q1, Q2, q1_l, q1_r, q2_l, q2_r
+
 
     def estimate_pose(self, q1, q2, Q1, Q2, max_iter=100):
         """
@@ -431,7 +433,7 @@ class VisualOdometry():
         # Data saved for bundle adjustment later
         new_node = node(frameID=i, keypoints=tp1_l)
         new_node.image = img1_l
-        new_node.points3D = Q1 
+        new_node.points3D = Q2 
         new_node.set_transform(transform=transformation_matrix)
         graph.add_node(new_node)
 
@@ -508,7 +510,7 @@ class VisualOdometry():
 
 
 def main():
-    data_dir = 'KITTI_sequence_2'  # Try KITTI_sequence_2
+    data_dir = 'KITTI_sequence_1'  # Try KITTI_sequence_2 os.path.join("kitti", '07') #
     vo = VisualOdometry(data_dir)
     print ("lenght of gt poses: " + str(len(vo.gt_poses)))
     g = graph()
@@ -552,29 +554,29 @@ def main():
     
   
     # Run bundle adjustment and get the optimized solution
-    # opt_params = run_BA()
-    # adjusted_transformation = vo.estimate_new_pose(opt_params=opt_params)
+    opt_params = run_BA()
+    adjusted_transformation = vo.estimate_new_pose(opt_params=opt_params)
 
-    # gt_path = []
-    # estimated_path = []
-    # for i, gt_pose in enumerate(tqdm(vo.gt_poses, unit="poses")):
-    #     if i < 1:
-    #         cur_pose = gt_pose
+    gt_path = []
+    estimated_path = []
+    for i, gt_pose in enumerate(tqdm(vo.gt_poses, unit="poses")):
+        if i < 1:
+            cur_pose = gt_pose
             
-    #         new_poses.append(cur_pose)
-    #     else:
-    #         if (i == len(adjusted_transformation )):
-    #             break
-    #         transf = adjusted_transformation[i-1] 
-    #         new_poses.append(transf)
-    #         cur_pose = np.matmul(cur_pose, transf)
+            new_poses.append(cur_pose)
+        else:
+            if (i == len(adjusted_transformation )):
+                break
+            transf = adjusted_transformation[i-1] 
+            new_poses.append(transf)
+            cur_pose = np.matmul(cur_pose, transf)
 
 
-    #     gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
-    #     estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
+        gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
+        estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
 
-    # plotting.visualize_paths(gt_path, estimated_path, "Stereo Visual Odometry with bundle adjustment",
-    #                          file_out=os.path.basename(data_dir) + ".html")
+    plotting.visualize_paths(gt_path, estimated_path, "Stereo Visual Odometry with bundle adjustment",
+                             file_out=os.path.basename(data_dir) + ".html")
     
 
 

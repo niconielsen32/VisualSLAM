@@ -1,7 +1,9 @@
 
 import cv2
+from matplotlib import projections
 
 import numpy as np 
+from numpy.linalg import inv
 import os
 import matplotlib.pyplot as plt
 
@@ -209,7 +211,7 @@ class graph():
         fig2 = plt.figure()
         fig3 = plt.figure()
         
-        ax = fig.add_subplot()
+        ax = fig.add_subplot(projection='3d')
         ax2 =fig2.add_subplot()
         ax3 =fig3.add_subplot()
 
@@ -218,36 +220,36 @@ class graph():
         z = []
         count = 0
         for point in self._3DPoints:
-            if count % 10 == 0:
+            if count % 200 == 0:
                 # if point[2] < 100 :  
                 x.append(point[0])
                 y.append(point[1])
                 z.append(point[2])
             count += 1
         print (f"Number of points shown is: {len(x)}" )
-        ax.scatter(x,z)
+        ax.scatter(x,y,z)
         ax.set_title("Global 3D Points")
         ax.set_xlabel('X Label')
-        ax.set_ylabel('Z Label')
-        #ax.set_zlabel('Z Label')
+        ax.set_ylabel('Y Label')
+        ax.set_zlabel('Z Label')
 
         x2 = []
         y2 = []
         z2 = []
         count = 0
         for point in self.points_to_plot:
-            if count % 10 == 0:
+            if count % 200 == 0:
                 # if point[2] < 50:  
                 x2.append(point[0])
                 y2.append(point[1])
                 z2.append(point[2])
             count += 1
         print (f"Number of points shown is: {len(x)}" )
-        ax2.scatter(x2,z2)
+        ax2.scatter(x2,y2)
         ax2.set_title("Relative 3D points")
         ax2.set_xlabel('X Label')
-        ax2.set_ylabel('Z Label')
-        #ax2.set_zlabel('Z Label')
+        ax2.set_ylabel('Y Label')
+        # ax2.set_zlabel('Z Label')
 
         
         x3 = []
@@ -258,11 +260,12 @@ class graph():
             x3.append(start_pose[0,3])
             y3.append(start_pose[1,3])
             z3.append(start_pose[2,3])
-            start_pose = np.matmul(start_pose, self.data[i+1].transformation)
+            start_pose = np.matmul(start_pose, self.data[i+1].transformation )
 
-        ax3.scatter(x3,z3)
+        ax3.scatter(x3,z3, c='b')
+        ax3.scatter(x,z, c='r')
         ax3.set_xlabel('X Label')
-        ax3.set_ylabel('Y Label')
-        #ax3.set_zlabel('Z Label')
+        ax3.set_ylabel('Z Label')
+        # ax3.set_zlabel('Z Label')
 
         plt.show()
