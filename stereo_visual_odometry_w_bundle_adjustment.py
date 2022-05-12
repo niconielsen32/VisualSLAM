@@ -321,7 +321,19 @@ class VisualOdometry():
         Q2 = cv2.triangulatePoints(self.P_l, self.P_r, q2_l.T, q2_r.T)
         # Un-homogenize
         Q2 = np.transpose(Q2[:3] / Q2[3])
-        return Q1, Q2
+
+        for i in range(len(Q2) - 1, 0, -1):
+            if (Q2[i][2] > 100 or Q1[i][2] > 100):
+                Q2 = np.delete(Q2, i, axis=0)
+                q2_l = np.delete(q2_l,i, axis=0)
+                q2_r = np.delete(q2_r,i, axis=0)
+                Q1 = np.delete(Q1, i, axis=0)
+                q1_l = np.delete(q1_l,i, axis=0)
+                q1_r = np.delete(q1_r,i, axis=0)
+
+
+
+        return Q1, Q2, q1_l, q1_r, q2_l, q2_r
 
     def estimate_pose(self, q1, q2, Q1, Q2, max_iter=100):
         """
@@ -409,58 +421,162 @@ class VisualOdometry():
 
         # Calculate the right keypoints
         tp1_l, tp1_r, tp2_l, tp2_r = self.calculate_right_qs(tp1_l, tp2_l, self.disparities[i - 1], self.disparities[i])
-        new_node = node(frameID=i, keypoints=tp1_l)
 
         # Calculate the 3D points
-        Q1, Q2 = self.calc_3d(tp1_l, tp1_r, tp2_l, tp2_r)
-        new_node.points3D = Q1
+        Q1, Q2, tp1_l, tp1_r, tp2_l, tp2_r = self.calc_3d(tp1_l, tp1_r, tp2_l, tp2_r)
         
-        new_node.image = img1_l
-
         # Estimate the transformation matrix
         transformation_matrix = self.estimate_pose(tp1_l, tp2_l, Q1, Q2)
         
         # Data saved for bundle adjustment later
+        new_node = node(frameID=i, keypoints=tp1_l)
+        new_node.image = img1_l
+        new_node.points3D = Q1 
         new_node.set_transform(transform=transformation_matrix)
         graph.add_node(new_node)
 
         return transformation_matrix
 
 
+    def estimate_new_pose(self, opt_params):
+        adjusted_transformations = []
+        with open("b_adj.txt", "rt") as file:
+            n_cams, n_Qs, n_qs = map(int, file.readline().split())
+
+            cam_idxs = np.empty(n_qs, dtype=int)
+            Q_idxs = np.empty(n_qs, dtype=int)
+            qs = np.empty((n_qs, 2))
+            
+            for i in range(n_qs):
+                cam_idx, Q_idx, x, y = file.readline().split()
+                cam_idxs[i] = int(cam_idx)
+                Q_idxs[i] = int(Q_idx)
+                qs[i] = [float(x), float(y)]
+            for i in range(9 * n_cams):
+                file.readline()
+            Qs = np.empty(n_Qs * 3)
+            for i in range(n_Qs * 3):
+                Qs[i] = float(file.readline())
+
+        # cam_params = opt_params[:n_cams * 9]
+        # cam_params = np.array(cam_params)
+        # cam_params = cam_params.reshape((n_cams, -1))
+
+        opt_3Dpoints = opt_params
+        opt_3Dpoints = np.array(opt_3Dpoints)
+        opt_3Dpoints = opt_3Dpoints.reshape((n_Qs, -1))
+        
+
+        for i in range(n_cams + 1):
+            tmp_q1 = []
+            tmp_q2 = []
+            tmp_Q1 = []
+            tmp_Q2 = []
+
+            for idx in range(len(cam_idxs)):
+                if cam_idxs[idx] == i:
+                    tmp_q1.append(qs[idx])
+                    tmp_Q1.append(opt_3Dpoints[Q_idxs[idx]])
+
+                if cam_idxs[idx] == i + 1: 
+                    tmp_q2.append(qs[idx])
+                    tmp_Q2.append(opt_3Dpoints[Q_idxs[idx]])
+            
+            if (len(tmp_q1) > len(tmp_q2)):
+                tmp_q1 = tmp_q1[:len(tmp_q2)]
+                tmp_Q1 = tmp_Q1[:len(tmp_q2)]
+            else :
+                tmp_q2 = tmp_q2[:len(tmp_q1)]
+                tmp_Q2 = tmp_Q2[:len(tmp_q1)]
+
+
+            tmp_q1 = np.array(tmp_q1)
+            tmp_q2 = np.array(tmp_q2)
+            tmp_Q1 = np.array(tmp_Q1)
+            tmp_Q2 = np.array(tmp_Q2)
+
+
+
+
+            if (len(tmp_q1) > 1 ):
+                adjusted_transformations.append(self.estimate_pose(tmp_q1, tmp_q2, tmp_Q1, tmp_Q2))
+            
+    
+        return np.array(adjusted_transformations)
+
+
+
+
 def main():
     data_dir = 'KITTI_sequence_2'  # Try KITTI_sequence_2
     vo = VisualOdometry(data_dir)
+    print ("lenght of gt poses: " + str(len(vo.gt_poses)))
     g = graph()
     
     # play_trip(vo.images_l, vo.images_r)  # Comment out to not play the trip
     
     gt_path = []
     estimated_path = []
+    original_poses = []
+    new_poses = []
     for i, gt_pose in enumerate(tqdm(vo.gt_poses, unit="poses")):
         if i < 1:
             cur_pose = gt_pose
+            original_poses.append(cur_pose)
+
+            # Set the first pose of the first camera
+            g.current_pose = cur_pose
         else:
             transf = vo.get_pose(i, g)
+            original_poses.append(transf)
+            # print("\nCalculated transformation:\n " + str(transf))
+            # print("\nLast pose:\n" + str(cur_pose))
             cur_pose = np.matmul(cur_pose, transf)
+            original_poses.append(cur_pose)
+            # print("\nPose after multiplication: \n" + str(cur_pose))
+            # print("\nData to visualize:\n" + str(cur_pose[0,3]) + " " + str(cur_pose[2,3]))
+
         gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
         estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
-        print(gt_pose)
-
+    
+    # Plot the original tradjectory before adjustment
+    plotting.visualize_paths(gt_path, estimated_path, "Stereo Visual Odometry",
+                              file_out=os.path.basename(data_dir) + ".html")
     
     # Create data for the bundle adjustment
     g.track_3D_points()   
     g.add_transforms()
     g.save_3D_points()
     g.add_start_of_document()
-
+    g.plot_3D_points()
+    
+  
     # Run bundle adjustment and get the optimized solution
-    opt_params = run_BA()
+    # opt_params = run_BA()
+    # adjusted_transformation = vo.estimate_new_pose(opt_params=opt_params)
+
+    # gt_path = []
+    # estimated_path = []
+    # for i, gt_pose in enumerate(tqdm(vo.gt_poses, unit="poses")):
+    #     if i < 1:
+    #         cur_pose = gt_pose
+            
+    #         new_poses.append(cur_pose)
+    #     else:
+    #         if (i == len(adjusted_transformation )):
+    #             break
+    #         transf = adjusted_transformation[i-1] 
+    #         new_poses.append(transf)
+    #         cur_pose = np.matmul(cur_pose, transf)
 
 
+    #     gt_path.append((gt_pose[0, 3], gt_pose[2, 3]))
+    #     estimated_path.append((cur_pose[0, 3], cur_pose[2, 3]))
 
+    # plotting.visualize_paths(gt_path, estimated_path, "Stereo Visual Odometry with bundle adjustment",
+    #                          file_out=os.path.basename(data_dir) + ".html")
+    
 
-    plotting.visualize_paths(gt_path, estimated_path, "Stereo Visual Odometry",
-                             file_out=os.path.basename(data_dir) + ".html")
 
 
 if __name__ == "__main__":
